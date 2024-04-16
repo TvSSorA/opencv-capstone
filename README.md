@@ -8,4 +8,6 @@ _For this project, we have worked on the human detection and counting for retail
 ## Approach
 
 ## Installation 
+* **Install libraries:** 
+  `pip install -r requirements.txt`
 ## Performance of code
