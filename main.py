@@ -69,7 +69,7 @@ def extract_frames(cut_video, output_folder, fps):
 
 if __name__ == "__main__":
     video_path = "H265.mp4"  # Path to the input video
-    output_folder = "output_folder"  # Output folder to save the modified video and extracted frames
+    output_folder = "../output_folder"  # Output folder to save the modified video and extracted frames
     output_file = "output_file.mp4"
     cut_video = output_file
     main(video_path, output_folder)
