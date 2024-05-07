@@ -78,7 +78,7 @@ def extract_frames(input_file, output_folder, fps):
 
 if __name__ == "__main__":
     video_paths = ["H265.mp4", "ani1.mp4", "ani2.mp4"]  # Paths to the input video files
-    output_folder = "output_folder_2"  # Output folder to save the modified videos and extracted frames
+    output_folder = "../output_folder_2"  # Output folder to save the modified videos and extracted frames
 
     # Create a pool of worker processes
     with Pool(processes=len(video_paths)) as pool:
