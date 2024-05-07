@@ -63,5 +63,5 @@ def select_best_frames(video_path, output_folder):
 
 # Example usage
 video_path = "H265.mp4"  # Path to the input video
-output_folder = "best_frames"  # Output folder to save the best frames
+output_folder = "../best_frames"  # Output folder to save the best frames
 select_best_frames(video_path, output_folder)
