@@ -1,10 +1,9 @@
-import numpy as np
 from ultralytics import YOLO
 import cv2
 import math
 from sort import *
-cap = cv2.VideoCapture('cctv.mp4')  # For RTSP video source
-model = YOLO('yolov8s.pt')
+cap = cv2.VideoCapture(0)  # For RTSP video source
+model = YOLO('yolov8l.pt')
 
 classNames = ["person"]
 
@@ -45,7 +44,7 @@ while True:
             cls = int(box.cls[0])
 
             # Only process the detection if the class is "person"
-            if cls == 0 and conf > 0.3:  # 0 is the class index for "person" in COCO
+            if cls == 0 and conf > 0.6:  # 0 is the class index for "person" in COCO
                 currentArray = np.array([x1, y1, x2, y2, conf])
                 detections = np.vstack((detections, currentArray))
 

@@ -1,79 +1,49 @@
 import cv2
-import os
-import subprocess
+import supervision as sv
+from supervision import ColorLookup
+from ultralytics import YOLO
 
-video_path = 'H265.mp4'
-cap = cv2.VideoCapture(video_path)
-fps = cap.get(cv2.CAP_PROP_FPS)
-width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
-height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
-total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
-duration = total_frames / fps
+model = YOLO("yolov8l.pt")
+tracker = sv.ByteTrack()  # Initialize ByteTrack
+box_annotator = sv.BoundingBoxAnnotator(color_lookup=ColorLookup.TRACK)
+label_annotator = sv.LabelAnnotator()
+trace_annotator = sv.TraceAnnotator()
+
+def process_frame(frame):
+    results = model(frame)[0]  # Perform object detection
+    detections = sv.Detections.from_ultralytics(results)
+
+    # Filter only humans
+    human_detections = detections[detections.class_id == 0]
+
+    human_detections = tracker.update_with_detections(human_detections)  # Update tracker with human detections
+
+    labels = [f"#{tracker_id}" for tracker_id in human_detections.tracker_id]
+
+    annotated_frame = box_annotator.annotate(frame.copy(), detections=human_detections)
+    annotated_frame = label_annotator.annotate(annotated_frame, detections=human_detections, labels=labels)
+    annotated_frame = trace_annotator.annotate(annotated_frame, detections=human_detections)
+
+    return annotated_frame
+
+# Open RTSP stream
+cap = cv2.VideoCapture("rtsp://192.168.5.157/live/0/MAIN")
+
+if not cap.isOpened():
+    print("Error opening video stream")
+    exit()
+
+while True:
+    ret, frame = cap.read()
+    if not ret:
+        break
+
+    vi = process_frame(frame)
+    annotated_frame = cv2.resize(vi, (960, 540))
+    cv2.imshow("Tracking Results (Humans Only)", annotated_frame)
+
+    if cv2.waitKey(1) & 0xFF == ord('q'):
+        break
+
 cap.release()
-
-
-def main(video_path, output_folder):
-    if not cap.isOpened():
-        print("Error: Could not open video file.")
-        return
-
-    print("Video Information:")
-    print("Video Format:", video_path.split(".")[-1])
-    print(f"Resolution: {width}x{height}")
-    print(f"FPS: {fps}")
-    print(f"Duration: {duration} seconds")
-
-    # Create output folder
-    os.makedirs(output_folder, exist_ok=True)
-
-
-# Cut the video
-def reduce_video(video_path, output_file, start_time, end_time):
-
-    # FFmpeg command to skip frames and adjust frame rate
-    ffmpeg_cmd = f'ffmpeg -i "{video_path}" -ss "{start_time}" -to "{end_time}" -c:v copy -c:a copy "{output_file}"'
-
-    # Execute the FFmpeg command
-    try:
-        subprocess.run(ffmpeg_cmd, check=True, shell=True)
-        print(f"Video time length reduced successfully. Saved as {output_folder}")
-    except subprocess.CalledProcessError as e:
-        print(f"Error: Failed to reduce video time length: {e}")
-
-    print("Frames extracted and saved.")
-
-
-def extract_frames(cut_video, output_folder, fps):
-    # Open the cut video file
-    cap = cv2.VideoCapture(cut_video)
-    if not cap.isOpened():
-        print("Error: Could not open cut video file.")
-        return
-
-    # Read frames and save every 5th and 15th frame of each second
-    frame_interval = int(fps)
-    frame_number = 0
-    while True:
-        ret, frame = cap.read()
-        if not ret:
-            break
-        if frame_number % frame_interval == 4 or frame_number % frame_interval == 14:
-            second = frame_number // frame_interval + 1
-            second_folder = os.path.join(output_folder, f"second_{second}")
-            os.makedirs(second_folder, exist_ok=True)
-            cv2.imwrite(os.path.join(second_folder, f"frame_{frame_number}.jpg"), frame)
-        frame_number += 1
-
-    cap.release()
-
-
-if __name__ == "__main__":
-    video_path = "H265.mp4"  # Path to the input video
-    output_folder = "../output_folder"  # Output folder to save the modified video and extracted frames
-    output_file = "output_file.mp4"
-    cut_video = output_file
-    main(video_path, output_folder)
-    start_time = '00:00:01'
-    end_time = '00:00:20'
-    reduce_video(video_path, output_file, start_time, end_time)
-    extract_frames(cut_video, output_folder, fps)
+cv2.destroyAllWindows()
