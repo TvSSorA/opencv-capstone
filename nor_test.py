@@ -39,7 +39,7 @@ while True:
     for result in results:
         for r in result.boxes.data.tolist():
             x1, y1, x2, y2, conf, cls = r
-            if int(cls) == 0 and conf >= 0.5:
+            if int(cls) == 0:
                 centroid = np.array([(x1 + x2) / 2, (y1 + y2) / 2])
                 detections.append(Detection(points=centroid, data={"scores": conf, "bbox": [x1, y1, x2, y2]}))
 
