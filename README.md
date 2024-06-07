@@ -10,4 +10,7 @@ _For this project, we have worked on the human detection and counting for retail
 ## Installation 
 * **Install libraries:** 
   `pip install -r requirements.txt`
-## Performance of code
+  `pip install fastapi pymongo uvicorn opencv-python-headless ultralytics loguru`
+
+## Run the FastAPI Application
+  `python main.py`
