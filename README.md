@@ -9,7 +9,7 @@ _For this project, we have worked on the human detection and counting for retail
 
 ## Installation 
 * **Install libraries:** 
-  `conda env create -f Storai.yml`
+  `conda env create -f environment.yml`
 ## Run the Application
  * **Run Python file:** 
   `python main.py`
