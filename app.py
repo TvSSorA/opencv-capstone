@@ -76,23 +76,34 @@ async def list_active_cameras_api():
 @app.get("/latest-images")
 async def get_latest_images():
     try:
-        current_date = datetime.now().strftime("%Y-%m-%d")
-        whole_frame_dir = os.path.join("whole_frames", current_date)
-        annotated_frame_dir = os.path.join("annotated_images", current_date)
+        result = {}
+        for device_id in list_active_cameras():
+            current_date = datetime.now().strftime("%Y-%m-%d")
+            whole_frame_dir = os.path.join("whole_frames", device_id, current_date)
+            annotated_frame_dir = os.path.join("annotated_images", device_id, current_date)
 
-        whole_frame_files = sorted(os.listdir(whole_frame_dir),
-                                   key=lambda x: os.path.getmtime(os.path.join(whole_frame_dir, x)), reverse=True)
-        annotated_frame_files = sorted(os.listdir(annotated_frame_dir),
-                                       key=lambda x: os.path.getmtime(os.path.join(annotated_frame_dir, x)),
-                                       reverse=True)
+            if os.path.exists(whole_frame_dir):
+                whole_frame_files = sorted(os.listdir(whole_frame_dir),
+                                           key=lambda x: os.path.getmtime(os.path.join(whole_frame_dir, x)),
+                                           reverse=True)
+                latest_whole_frame = whole_frame_files[0] if whole_frame_files else None
+            else:
+                latest_whole_frame = None
 
-        latest_whole_frame = whole_frame_files[0] if whole_frame_files else None
-        latest_annotated_frame = annotated_frame_files[0] if annotated_frame_files else None
+            if os.path.exists(annotated_frame_dir):
+                annotated_frame_files = sorted(os.listdir(annotated_frame_dir),
+                                               key=lambda x: os.path.getmtime(os.path.join(annotated_frame_dir, x)),
+                                               reverse=True)
+                latest_annotated_frame = annotated_frame_files[0] if annotated_frame_files else None
+            else:
+                latest_annotated_frame = None
 
-        return {
-            "latest_whole_frame": f"/whole_frames/{current_date}/{latest_whole_frame}" if latest_whole_frame else None,
-            "latest_annotated_frame": f"/annotated_images/{current_date}/{latest_annotated_frame}" if latest_annotated_frame else None
-        }
+            result[device_id] = {
+                "latest_whole_frame": f"/whole_frames/{device_id}/{current_date}/{latest_whole_frame}" if latest_whole_frame else None,
+                "latest_annotated_frame": f"/annotated_images/{device_id}/{current_date}/{latest_annotated_frame}" if latest_annotated_frame else None
+            }
+
+        return result
     except Exception as e:
         logger.error(f"Error getting latest images: {e}")
         return {"error": str(e)}

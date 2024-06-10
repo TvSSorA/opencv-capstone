@@ -73,7 +73,7 @@ def ensure_directory_exists(directory):
         os.makedirs(directory)
 
 
-def process_frame(frame, results, update_callback=None):
+def process_frame(device_id, frame, results, update_callback=None):
     detections = sv.Detections.from_ultralytics(results)
 
     # Filter only humans
@@ -90,9 +90,9 @@ def process_frame(frame, results, update_callback=None):
 
     # Get current date
     current_date = datetime.now().strftime("%Y-%m-%d")
-    output_dir = os.path.join(base_output_dir, current_date)
-    annotated_output_dir = os.path.join(base_annotated_output_dir, current_date)
-    whole_frame_dir = os.path.join(base_whole_frame_dir, current_date)
+    output_dir = os.path.join(base_output_dir, device_id, current_date)
+    annotated_output_dir = os.path.join(base_annotated_output_dir, device_id, current_date)
+    whole_frame_dir = os.path.join(base_whole_frame_dir, device_id, current_date)
 
     ensure_directory_exists(output_dir)
     ensure_directory_exists(annotated_output_dir)
@@ -177,7 +177,7 @@ def detect_and_process_frames(device_id, update_callback=None):
         frame = frame_queues[device_id].get()
         results = model.predict(source=frame, show=False, stream=False, classes=[0])
         for result in results:
-            annotated_frame = process_frame(frame, result, update_callback)
+            annotated_frame = process_frame(device_id, frame, result, update_callback)
             if annotated_frame is not None:
                 logger.info(f"New frame processed and saved for device {device_id}.")
     logger.info(f"Stopped frame processing for device {device_id}")
