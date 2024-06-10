@@ -41,7 +41,7 @@ saved_images_ids = set()
 current_uuids = set()
 
 # Queue for frames to be processed
-frame_queue = queue.Queue(maxsize=10)
+frame_queues = {}
 
 
 def get_uuid_for_tracker_id(tracker_id):
@@ -132,7 +132,7 @@ def process_frame(frame, results, update_callback=None):
         date_time = now.strftime("%Y-%m-%d-%H-%M-%S")
         cv2.imwrite(os.path.join(annotated_output_dir, 'annotated-' + date_time + '.jpg'), annotated_frame)
 
-        # Call the update callback
+        # Call the update callback if provided
         if update_callback:
             update_callback({
                 "uuid": uuid_label,
@@ -146,8 +146,9 @@ def process_frame(frame, results, update_callback=None):
     return None
 
 
-def capture_frames(rtsp_url):
+def capture_frames(device_id, rtsp_url):
     cap = cv2.VideoCapture(rtsp_url)
+    frame_queue = frame_queues[device_id]
     while cap.isOpened():
         ret, frame = cap.read()
         if not ret:
@@ -158,7 +159,8 @@ def capture_frames(rtsp_url):
     cap.release()
 
 
-def detect_and_process_frames(update_callback=None):
+def detect_and_process_frames(device_id, update_callback=None):
+    frame_queue = frame_queues[device_id]
     while True:
         if frame_queue.empty():
             continue
@@ -167,7 +169,7 @@ def detect_and_process_frames(update_callback=None):
         for result in results:
             annotated_frame = process_frame(frame, result, update_callback)
             if annotated_frame is not None:
-                logger.info("New frame processed and saved.")
+                logger.info(f"New frame processed and saved for device {device_id}.")
 
 
 def get_rtsp_url(device_id):
@@ -183,13 +185,14 @@ def start_detection(device_id, update_callback=None):
         logger.error(f"RTSP URL not found for device with ID: {device_id}")
         return
 
-    capture_thread = threading.Thread(target=capture_frames, args=(rtsp_url,))
-    process_thread = threading.Thread(target=detect_and_process_frames, args=(update_callback,))
-
-
     # Update device status to "connected"
     devices_collection.update_one({"_id": device_id}, {"$set": {"status": "connected"}})
 
+    # Initialize the frame queue for this device
+    frame_queues[device_id] = queue.Queue(maxsize=10)
+
+    capture_thread = threading.Thread(target=capture_frames, args=(device_id, rtsp_url))
+    process_thread = threading.Thread(target=detect_and_process_frames, args=(device_id, update_callback))
     capture_thread.start()
     process_thread.start()
     capture_thread.join()
@@ -199,3 +202,7 @@ def start_detection(device_id, update_callback=None):
 def stop_detection(device_id):
     # Update device status to "disconnected"
     devices_collection.update_one({"_id": device_id}, {"$set": {"status": "disconnected"}})
+
+    # Remove the frame queue for this device
+    if device_id in frame_queues:
+        del frame_queues[device_id]

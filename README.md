@@ -12,4 +12,4 @@ _For this project, we have worked on the human detection and counting for retail
   `conda env create -f environment.yml`
 ## Run the Application
  * **Run Python file:** 
-  `python main.py`
+  `uvicorn app:app --host 0.0.0.0 --port 8000 --workers 4`

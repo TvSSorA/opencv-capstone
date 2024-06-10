@@ -1,10 +1,9 @@
 from fastapi import FastAPI, WebSocket, HTTPException
-from multiprocessing import Pool, Value
+from multiprocessing import Process
 from detection.detection import start_detection, stop_detection
 import os
 from datetime import datetime
 from pymongo import MongoClient
-import threading
 import json
 
 app = FastAPI()
@@ -15,43 +14,46 @@ db = client['capstone-project']
 collection = db['images']
 devices_collection = db['devices']
 
-pool = None
-is_running = Value('b', False)
+# Dictionary to store running processes for each device
+device_processes = {}
 
 
 @app.on_event("startup")
 async def startup_event():
-    global pool
-    pool = Pool(processes=1)
+    pass
 
 
 @app.on_event("shutdown")
 async def shutdown_event():
-    global pool
-    if pool:
-        pool.terminate()
-        pool.join()
+    global device_processes
+    for process in device_processes.values():
+        process.terminate()
+    device_processes.clear()
 
 
 @app.post("/start-detection/{device_id}")
 async def start_detection_api(device_id: str):
-    global pool, is_running
-    if not pool:
-        pool = Pool(processes=1)
-    is_running.value = True
-    pool.apply_async(start_detection, (device_id, send_updates))
+    if device_id in device_processes:
+        raise HTTPException(status_code=400, detail="Detection already running for this device")
+
+    process = Process(target=start_detection, args=(device_id, send_updates))
+    process.start()
+    device_processes[device_id] = process
     return {"status": "detection started"}
 
 
 @app.post("/stop-detection/{device_id}")
 async def stop_detection_api(device_id: str):
-    global pool, is_running
-    if pool:
-        pool.terminate()
-        pool.join()
-        pool = None
-    is_running.value = False
+    if device_id not in device_processes:
+        raise HTTPException(status_code=404, detail="Detection not running for this device")
+
+    process = device_processes[device_id]
+    process.terminate()
+    process.join()
+    del device_processes[device_id]
+
     stop_detection(device_id)
+
     return {"status": "detection stopped"}
 
 
@@ -84,7 +86,7 @@ async def websocket_endpoint(websocket: WebSocket):
     await websocket.accept()
     connections.append(websocket)
     try:
-        while is_running.value:
+        while True:
             await websocket.receive_text()
     except Exception as e:
         print(f"WebSocket error: {e}")
