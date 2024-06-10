@@ -1,3 +1,5 @@
+# detection/detection.py
+
 import cv2
 import supervision as sv
 from supervision import ColorLookup
@@ -9,6 +11,9 @@ import threading
 import queue
 from loguru import logger
 from pymongo import MongoClient
+
+# Import utils
+from .utils import logger
 
 # MongoDB setup
 client = MongoClient('mongodb+srv://adam123:tntguy123@vnmc-database.r8b4uv0.mongodb.net/')
@@ -40,8 +45,12 @@ tracker_id_to_uuid = {}
 saved_images_ids = set()
 current_uuids = set()
 
-# Queue for frames to be processed
+# Dictionary for frame queues and threads for each camera
 frame_queues = {}
+capture_threads = {}
+process_threads = {}
+stop_events = {}  # Dictionary to store stop events for each camera
+active_cameras = {}  # Dictionary to keep track of active cameras
 
 
 def get_uuid_for_tracker_id(tracker_id):
@@ -132,7 +141,7 @@ def process_frame(frame, results, update_callback=None):
         date_time = now.strftime("%Y-%m-%d-%H-%M-%S")
         cv2.imwrite(os.path.join(annotated_output_dir, 'annotated-' + date_time + '.jpg'), annotated_frame)
 
-        # Call the update callback if provided
+        # Call the update callback
         if update_callback:
             update_callback({
                 "uuid": uuid_label,
@@ -146,30 +155,32 @@ def process_frame(frame, results, update_callback=None):
     return None
 
 
-def capture_frames(device_id, rtsp_url):
+def capture_frames(rtsp_url, device_id):
+    logger.info(f"Starting frame capture for device {device_id} with URL {rtsp_url}")
     cap = cv2.VideoCapture(rtsp_url)
-    frame_queue = frame_queues[device_id]
-    while cap.isOpened():
+    while cap.isOpened() and not stop_events[device_id].is_set():
         ret, frame = cap.read()
         if not ret:
             break
-        if frame_queue.full():
+        if frame_queues[device_id].full():
             continue
-        frame_queue.put(frame)
+        frame_queues[device_id].put(frame)
     cap.release()
+    logger.info(f"Stopped frame capture for device {device_id}")
 
 
 def detect_and_process_frames(device_id, update_callback=None):
-    frame_queue = frame_queues[device_id]
-    while True:
-        if frame_queue.empty():
+    logger.info(f"Starting frame processing for device {device_id}")
+    while device_id in frame_queues and not stop_events[device_id].is_set():
+        if frame_queues[device_id].empty():
             continue
-        frame = frame_queue.get()
+        frame = frame_queues[device_id].get()
         results = model.predict(source=frame, show=False, stream=False, classes=[0])
         for result in results:
             annotated_frame = process_frame(frame, result, update_callback)
             if annotated_frame is not None:
                 logger.info(f"New frame processed and saved for device {device_id}.")
+    logger.info(f"Stopped frame processing for device {device_id}")
 
 
 def get_rtsp_url(device_id):
@@ -185,24 +196,65 @@ def start_detection(device_id, update_callback=None):
         logger.error(f"RTSP URL not found for device with ID: {device_id}")
         return
 
+    frame_queues[device_id] = queue.Queue(maxsize=10)
+    stop_events[device_id] = threading.Event()  # Initialize stop event for this device
+
+    capture_thread = threading.Thread(target=capture_frames, args=(rtsp_url, device_id))
+    process_thread = threading.Thread(target=detect_and_process_frames, args=(device_id, update_callback))
+
+    capture_threads[device_id] = capture_thread
+    process_threads[device_id] = process_thread
+
     # Update device status to "connected"
     devices_collection.update_one({"_id": device_id}, {"$set": {"status": "connected"}})
 
-    # Initialize the frame queue for this device
-    frame_queues[device_id] = queue.Queue(maxsize=10)
-
-    capture_thread = threading.Thread(target=capture_frames, args=(device_id, rtsp_url))
-    process_thread = threading.Thread(target=detect_and_process_frames, args=(device_id, update_callback))
     capture_thread.start()
     process_thread.start()
-    capture_thread.join()
-    process_thread.join()
+
+    active_cameras[device_id] = rtsp_url  # Track active camera
+    logger.info(f"Started detection for device {device_id}. Total active devices: {len(capture_threads)}")
 
 
 def stop_detection(device_id):
+    logger.info(f"Attempting to stop detection for device {device_id}")
+
+    if device_id in stop_events:
+        stop_events[device_id].set()  # Signal threads to stop
+
+    if device_id in capture_threads:
+        logger.debug(f"Stopping capture thread for device {device_id}")
+        capture_threads[device_id].join(timeout=5)  # Allow some time for the thread to stop
+        capture_threads.pop(device_id)
+    else:
+        logger.warning(f"No capture thread found for device {device_id}")
+
+    if device_id in process_threads:
+        logger.debug(f"Stopping process thread for device {device_id}")
+        process_threads[device_id].join(timeout=5)  # Allow some time for the thread to stop
+        process_threads.pop(device_id)
+    else:
+        logger.warning(f"No process thread found for device {device_id}")
+
+    if device_id in frame_queues:
+        logger.debug(f"Clearing frame queue for device {device_id}")
+        frame_queues.pop(device_id)
+    else:
+        logger.warning(f"No frame queue found for device {device_id}")
+
+    if device_id in active_cameras:
+        logger.debug(f"Removing active camera entry for device {device_id}")
+        active_cameras.pop(device_id)
+    else:
+        logger.warning(f"No active camera entry found for device {device_id}")
+
+    if device_id in stop_events:
+        logger.debug(f"Removing stop event for device {device_id}")
+        stop_events.pop(device_id)
+
     # Update device status to "disconnected"
     devices_collection.update_one({"_id": device_id}, {"$set": {"status": "disconnected"}})
+    logger.info(f"Stopped detection for device {device_id}. Total active devices: {len(capture_threads)}")
 
-    # Remove the frame queue for this device
-    if device_id in frame_queues:
-        del frame_queues[device_id]
+
+def list_active_cameras():
+    return list(active_cameras.keys())

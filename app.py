@@ -1,10 +1,16 @@
+# app.py
+
 from fastapi import FastAPI, WebSocket, HTTPException
-from multiprocessing import Process
-from detection.detection import start_detection, stop_detection
+from multiprocessing import Pool, Value
 import os
 from datetime import datetime
 from pymongo import MongoClient
+import threading
 import json
+
+# Import from detection subdirectory
+from detection.detection import start_detection, stop_detection, list_active_cameras
+from loguru import logger
 
 app = FastAPI()
 
@@ -14,47 +20,57 @@ db = client['capstone-project']
 collection = db['images']
 devices_collection = db['devices']
 
-# Dictionary to store running processes for each device
-device_processes = {}
+pool = None
+is_running = {}
 
 
 @app.on_event("startup")
 async def startup_event():
-    pass
+    global pool
+    pool = Pool(processes=1)
+    logger.info("Application startup complete.")
 
 
 @app.on_event("shutdown")
 async def shutdown_event():
-    global device_processes
-    for process in device_processes.values():
-        process.terminate()
-    device_processes.clear()
+    global pool
+    if pool:
+        pool.terminate()
+        pool.join()
+    logger.info("Application shutdown complete.")
 
 
 @app.post("/start-detection/{device_id}")
 async def start_detection_api(device_id: str):
-    if device_id in device_processes:
-        raise HTTPException(status_code=400, detail="Detection already running for this device")
+    global is_running
+    if device_id in is_running and is_running[device_id]:
+        logger.warning(f"Detection already started for device {device_id}")
+        return {"status": "detection already started"}
 
-    process = Process(target=start_detection, args=(device_id, send_updates))
-    process.start()
-    device_processes[device_id] = process
+    is_running[device_id] = True
+    start_detection(device_id, send_updates)
+    logger.info(f"Detection started for device {device_id}")
     return {"status": "detection started"}
 
 
 @app.post("/stop-detection/{device_id}")
 async def stop_detection_api(device_id: str):
-    if device_id not in device_processes:
-        raise HTTPException(status_code=404, detail="Detection not running for this device")
+    global is_running
+    if device_id not in is_running or not is_running[device_id]:
+        logger.warning(f"Detection not running for device {device_id}")
+        return {"status": "detection not running"}
 
-    process = device_processes[device_id]
-    process.terminate()
-    process.join()
-    del device_processes[device_id]
-
+    is_running[device_id] = False
     stop_detection(device_id)
-
+    logger.info(f"Detection stopped for device {device_id}")
     return {"status": "detection stopped"}
+
+
+@app.get("/list-active-cameras")
+async def list_active_cameras_api():
+    active_cameras = list_active_cameras()
+    logger.info(f"Listing active cameras: {active_cameras}")
+    return {"active_cameras": active_cameras}
 
 
 @app.get("/latest-images")
@@ -78,6 +94,7 @@ async def get_latest_images():
             "latest_annotated_frame": f"/annotated_images/{current_date}/{latest_annotated_frame}" if latest_annotated_frame else None
         }
     except Exception as e:
+        logger.error(f"Error getting latest images: {e}")
         return {"error": str(e)}
 
 
@@ -86,10 +103,10 @@ async def websocket_endpoint(websocket: WebSocket):
     await websocket.accept()
     connections.append(websocket)
     try:
-        while True:
+        while any(is_running.values()):
             await websocket.receive_text()
     except Exception as e:
-        print(f"WebSocket error: {e}")
+        logger.error(f"WebSocket error: {e}")
     finally:
         connections.remove(websocket)
         await websocket.close()
@@ -103,4 +120,4 @@ def send_updates(data):
         try:
             connection.send_text(json.dumps(data))
         except Exception as e:
-            print(f"Error sending data: {e}")
+            logger.error(f"Error sending data: {e}")
