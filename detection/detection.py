@@ -31,11 +31,13 @@ label_annotator = sv.LabelAnnotator()
 trace_annotator = sv.TraceAnnotator()
 
 # Directories to save images
+images_dir = 'outputs'
 base_output_dir = 'cropped_images'
 base_annotated_output_dir = 'annotated_images'
 base_whole_frame_dir = 'whole_frames'
 
 # Create base directories if they don't exist
+os.makedirs(images_dir, exist_ok=True)
 os.makedirs(base_output_dir, exist_ok=True)
 os.makedirs(base_annotated_output_dir, exist_ok=True)
 os.makedirs(base_whole_frame_dir, exist_ok=True)
@@ -90,10 +92,11 @@ def process_frame(device_id, frame, results, update_callback=None):
 
     # Get current date
     current_date = datetime.now().strftime("%Y-%m-%d")
-    output_dir = os.path.join(base_output_dir, device_id, current_date)
-    annotated_output_dir = os.path.join(base_annotated_output_dir, device_id, current_date)
-    whole_frame_dir = os.path.join(base_whole_frame_dir, device_id, current_date)
+    output_dir = os.path.join(images_dir, base_output_dir, device_id, current_date)
+    annotated_output_dir = os.path.join(images_dir, base_annotated_output_dir, device_id, current_date)
+    whole_frame_dir = os.path.join(images_dir, base_whole_frame_dir, device_id, current_date)
 
+    ensure_directory_exists(images_dir)
     ensure_directory_exists(output_dir)
     ensure_directory_exists(annotated_output_dir)
     ensure_directory_exists(whole_frame_dir)

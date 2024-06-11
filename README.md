@@ -10,8 +10,8 @@ _For this project, we have worked on the human detection and counting for retail
 ## Installation 
 * **Install libraries:** 
   `conda env create -f environment.yml`
-* `conda env update --file environment.yml --prune
-`
+* **Update libraries:** 
+`conda env update --file environment.yml --prune`
 ## Run the Application
  * **Run Python file:** 
-  `uvicorn app:app --host 0.0.0.0 --port 8000 --workers 4`
+  `python main.py`
