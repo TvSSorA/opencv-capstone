@@ -15,3 +15,7 @@ _For this project, we have worked on the human detection and counting for retail
 ## Run the Application
  * **Run Python file:** 
   `python main.py`
+
+eb651c29-08eb-4c00-9e29-085cd42fe07b
+f4dae475-cb66-49db-8da5-a006af2d846d
+61924e43-ecbb-47ef-8f0f-e3e91404d1c9
