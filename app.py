@@ -1,6 +1,6 @@
 # app.py
 
-from fastapi import FastAPI, WebSocket, HTTPException
+from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException
 from multiprocessing import Pool, Value
 import os
 from datetime import datetime
@@ -22,6 +22,7 @@ devices_collection = db['devices']
 
 pool = None
 is_running = {}
+connections = []  # List to keep track of active WebSocket connections
 
 
 @app.on_event("startup")
@@ -50,6 +51,7 @@ async def start_detection_api(device_id: str):
     is_running[device_id] = True
     start_detection(device_id, send_updates)
     logger.info(f"Detection started for device {device_id}")
+    await broadcast_active_cameras()
     return {"status": "detection started"}
 
 
@@ -63,6 +65,7 @@ async def stop_detection_api(device_id: str):
     is_running[device_id] = False
     stop_detection(device_id)
     logger.info(f"Detection stopped for device {device_id}")
+    await broadcast_active_cameras()
     return {"status": "detection stopped"}
 
 
@@ -114,16 +117,24 @@ async def websocket_endpoint(websocket: WebSocket):
     await websocket.accept()
     connections.append(websocket)
     try:
-        while any(is_running.values()):
-            await websocket.receive_text()
+        await broadcast_active_cameras(websocket)  # Send initial list of active cameras on connect
+        while True:
+            await websocket.receive_text()  # Keep the connection open
+    except WebSocketDisconnect:
+        connections.remove(websocket)
     except Exception as e:
         logger.error(f"WebSocket error: {e}")
-    finally:
         connections.remove(websocket)
-        await websocket.close()
 
 
-connections = []
+async def broadcast_active_cameras(websocket=None):
+    active_cameras = list_active_cameras()
+    message = json.dumps({"active_cameras": active_cameras})
+    if websocket:
+        await websocket.send_text(message)
+    else:
+        for connection in connections:
+            await connection.send_text(message)
 
 
 def send_updates(data):
