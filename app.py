@@ -75,7 +75,6 @@ async def list_active_cameras_api():
     logger.info(f"Listing active cameras: {active_cameras}")
     return {"active_cameras": active_cameras}
 
-
 @app.get("/latest-images")
 async def get_latest_images():
     try:

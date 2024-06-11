@@ -178,7 +178,7 @@ def detect_and_process_frames(device_id, update_callback=None):
         if frame_queues[device_id].empty():
             continue
         frame = frame_queues[device_id].get()
-        results = model.predict(source=frame, show=False, stream=False, classes=[0])
+        results = model.predict(source=frame, show=False, stream=False, classes=[0], imgsz=640)
         for result in results:
             annotated_frame = process_frame(device_id, frame, result, update_callback)
             if annotated_frame is not None:
@@ -216,7 +216,6 @@ def start_detection(device_id, update_callback=None):
 
     active_cameras[device_id] = rtsp_url  # Track active camera
     logger.info(f"Started detection for device {device_id}. Total active devices: {len(capture_threads)}")
-
 
 def stop_detection(device_id):
     logger.info(f"Attempting to stop detection for device {device_id}")
