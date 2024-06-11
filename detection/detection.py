@@ -38,9 +38,7 @@ base_whole_frame_dir = 'whole_frames'
 
 # Create base directories if they don't exist
 os.makedirs(images_dir, exist_ok=True)
-os.makedirs(base_output_dir, exist_ok=True)
-os.makedirs(base_annotated_output_dir, exist_ok=True)
-os.makedirs(base_whole_frame_dir, exist_ok=True)
+
 
 # Store unique IDs and their detection information
 tracker_id_to_uuid = {}
