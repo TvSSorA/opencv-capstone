@@ -1,16 +1,14 @@
-# app.py
-
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException
-from multiprocessing import Pool, Value
+from multiprocessing import Pool
+from pymongo import MongoClient
+from loguru import logger
 import os
 from datetime import datetime
-from pymongo import MongoClient
-import threading
 import json
+import threading
 
-# Import from detection subdirectory
+# Import detection functions
 from detection.detection import start_detection, stop_detection, list_active_cameras
-from loguru import logger
 
 app = FastAPI()
 
@@ -22,15 +20,13 @@ devices_collection = db['devices']
 
 pool = None
 is_running = {}
-connections = []  # List to keep track of active WebSocket connections
-
+connections = []
 
 @app.on_event("startup")
 async def startup_event():
     global pool
     pool = Pool(processes=1)
     logger.info("Application startup complete.")
-
 
 @app.on_event("shutdown")
 async def shutdown_event():
@@ -40,10 +36,8 @@ async def shutdown_event():
         pool.join()
     logger.info("Application shutdown complete.")
 
-
 @app.post("/start-detection/{device_id}")
 async def start_detection_api(device_id: str):
-    global is_running
     if device_id in is_running and is_running[device_id]:
         logger.warning(f"Detection already started for device {device_id}")
         return {"status": "detection already started"}
@@ -54,10 +48,8 @@ async def start_detection_api(device_id: str):
     await broadcast_active_cameras()
     return {"status": "detection started"}
 
-
 @app.post("/stop-detection/{device_id}")
 async def stop_detection_api(device_id: str):
-    global is_running
     if device_id not in is_running or not is_running[device_id]:
         logger.warning(f"Detection not running for device {device_id}")
         return {"status": "detection not running"}
@@ -67,7 +59,6 @@ async def stop_detection_api(device_id: str):
     logger.info(f"Detection stopped for device {device_id}")
     await broadcast_active_cameras()
     return {"status": "detection stopped"}
-
 
 @app.get("/list-active-cameras")
 async def list_active_cameras_api():
@@ -110,7 +101,6 @@ async def get_latest_images():
         logger.error(f"Error getting latest images: {e}")
         return {"error": str(e)}
 
-
 @app.websocket("/ws")
 async def websocket_endpoint(websocket: WebSocket):
     await websocket.accept()
@@ -125,7 +115,6 @@ async def websocket_endpoint(websocket: WebSocket):
         logger.error(f"WebSocket error: {e}")
         connections.remove(websocket)
 
-
 async def broadcast_active_cameras(websocket=None):
     active_cameras = list_active_cameras()
     message = json.dumps({"active_cameras": active_cameras})
@@ -134,7 +123,6 @@ async def broadcast_active_cameras(websocket=None):
     else:
         for connection in connections:
             await connection.send_text(message)
-
 
 def send_updates(data):
     for connection in connections:
