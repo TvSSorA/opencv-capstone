@@ -1,14 +1,10 @@
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException
+from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from multiprocessing import Pool
 from pymongo import MongoClient
 from loguru import logger
-import os
-from datetime import datetime
 import json
-import threading
-
-# Import detection functions
-from detection.detection import start_detection, stop_detection, list_active_cameras
+import asyncio
+from detection import start_detection, stop_detection, list_active_cameras
 
 app = FastAPI()
 
@@ -66,49 +62,14 @@ async def list_active_cameras_api():
     logger.info(f"Listing active cameras: {active_cameras}")
     return {"active_cameras": active_cameras}
 
-@app.get("/latest-images")
-async def get_latest_images():
-    try:
-        result = {}
-        for device_id in list_active_cameras():
-            current_date = datetime.now().strftime("%Y-%m-%d")
-            whole_frame_dir = os.path.join("whole_frames", device_id, current_date)
-            annotated_frame_dir = os.path.join("annotated_images", device_id, current_date)
-
-            if os.path.exists(whole_frame_dir):
-                whole_frame_files = sorted(os.listdir(whole_frame_dir),
-                                           key=lambda x: os.path.getmtime(os.path.join(whole_frame_dir, x)),
-                                           reverse=True)
-                latest_whole_frame = whole_frame_files[0] if whole_frame_files else None
-            else:
-                latest_whole_frame = None
-
-            if os.path.exists(annotated_frame_dir):
-                annotated_frame_files = sorted(os.listdir(annotated_frame_dir),
-                                               key=lambda x: os.path.getmtime(os.path.join(annotated_frame_dir, x)),
-                                               reverse=True)
-                latest_annotated_frame = annotated_frame_files[0] if annotated_frame_files else None
-            else:
-                latest_annotated_frame = None
-
-            result[device_id] = {
-                "latest_whole_frame": f"/whole_frames/{device_id}/{current_date}/{latest_whole_frame}" if latest_whole_frame else None,
-                "latest_annotated_frame": f"/annotated_images/{device_id}/{current_date}/{latest_annotated_frame}" if latest_annotated_frame else None
-            }
-
-        return result
-    except Exception as e:
-        logger.error(f"Error getting latest images: {e}")
-        return {"error": str(e)}
-
 @app.websocket("/ws")
 async def websocket_endpoint(websocket: WebSocket):
     await websocket.accept()
     connections.append(websocket)
     try:
-        await broadcast_active_cameras(websocket)  # Send initial list of active cameras on connect
+        await broadcast_active_cameras(websocket)
         while True:
-            await websocket.receive_text()  # Keep the connection open
+            await websocket.receive_text()
     except WebSocketDisconnect:
         connections.remove(websocket)
     except Exception as e:
@@ -124,9 +85,10 @@ async def broadcast_active_cameras(websocket=None):
         for connection in connections:
             await connection.send_text(message)
 
-def send_updates(data):
+async def send_updates(data):
     for connection in connections:
         try:
-            connection.send_text(json.dumps(data))
+            await connection.send_text(json.dumps(data))
         except Exception as e:
             logger.error(f"Error sending data: {e}")
+            connections.remove(connection)
