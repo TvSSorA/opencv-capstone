@@ -141,12 +141,9 @@ def process_frame(device_id, frame, results, update_callback=None):
         _, buffer = cv2.imencode('.jpg', annotated_frame)
         encoded_frame = base64.b64encode(buffer).decode('utf-8')
         data = {
-            "uuid": uuid_label,
-            "entry_timestamp": datetime.now().isoformat(),
-            "image_path": os.path.join(whole_frame_dir, uuid_label + '-whole-' + date_time + '.jpg'),
-            "annotated_image_path": os.path.join(annotated_output_dir, 'annotated-' + date_time + '.jpg'),
-            "heatmap_image_path": os.path.join(heatmap_output_dir, 'heatmap-' + date_time + '.jpg'),
-            "frame": encoded_frame
+            "image": encoded_frame,
+            "file_name": "test.jpg",
+            "time": int(now.timestamp() * 1000)
         }
         asyncio.run(send_update(data, update_callback))
     return annotated_frame
