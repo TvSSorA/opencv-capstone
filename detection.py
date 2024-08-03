@@ -73,14 +73,8 @@ active_cameras = {}
 
 def get_uuid_for_tracker_id(tracker_id):
     if tracker_id not in tracker_id_to_uuid:
-        new_uuid = str(uuid.uuid4()).replace("-", "")
+        new_uuid = str(uuid.uuid4())
         tracker_id_to_uuid[tracker_id] = new_uuid
-        collection.insert_one({
-            'uuid': new_uuid,
-            'entry_timestamp': datetime.now(),
-            'exit_timestamp': None,
-            'date': datetime.now().date().isoformat()
-        })
     return tracker_id_to_uuid[tracker_id]
 
 def ensure_directory_exists(directory):
@@ -94,7 +88,7 @@ def process_frame(device_id, frame, results, update_callback=None):
     detections = sv.Detections.from_ultralytics(results)
     human_detections = detections[detections.class_id == 0]
     human_detections = tracker.update_with_detections(human_detections)
-    labels = [f"#{get_uuid_for_tracker_id(tracker_id)}" for tracker_id in human_detections.tracker_id]
+    labels = [f"{get_uuid_for_tracker_id(tracker_id)}" for tracker_id in human_detections.tracker_id]
     min_length = min(len(human_detections.xyxy.tolist()), len(labels))
     new_detected_uuids = set()
     current_date = datetime.now().strftime("%Y-%m-%d")
@@ -115,16 +109,20 @@ def process_frame(device_id, frame, results, update_callback=None):
             x1, y1, x2, y2 = box
             crop_object = frame[int(y1):int(y2), int(x1):int(x2)]
             now = datetime.now()
+            timestamp = int(now.timestamp() * 1000)
             date_time = now.strftime("%Y-%m-%d-%H-%M-%S")
-            cv2.imwrite(os.path.join(output_dir, uuid_label + '-' + date_time + '.jpg'), crop_object)
-            cv2.imwrite(os.path.join(whole_frame_dir, uuid_label + '-whole-' + date_time + '.jpg'), frame)
+            cropped_frame_name = f"{uuid_label}-{date_time}.jpg"
+            whole_frame_name = f"{uuid_label}-whole-{date_time}.jpg"
+            cv2.imwrite(os.path.join(output_dir, cropped_frame_name), crop_object)
+            cv2.imwrite(os.path.join(whole_frame_dir, whole_frame_name), frame)
             saved_images_ids.add(uuid_label)
 
-    for uuid_label in current_uuids - new_detected_uuids:
-        collection.update_one(
-            {'uuid': uuid_label},
-            {'$set': {'exit_timestamp': datetime.now()}}
-        )
+            collection.insert_one({
+                "_id": uuid_label,
+                "device_id": device_id,
+                "file_name": cropped_frame_name,
+                "time": timestamp
+            })
 
     if new_detected_uuids - current_uuids:
         current_uuids.update(new_detected_uuids)
