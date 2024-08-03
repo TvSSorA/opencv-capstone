@@ -216,7 +216,7 @@ def start_detection(device_id, update_callback=None):
     capture_threads[device_id] = capture_thread
     process_threads[device_id] = process_thread
 
-    devices_collection.update_one({"_id": device_id}, {"$set": {"status": "connected"}})
+    devices_collection.update_one({"_id": device_id}, {"$set": {"status": "online"}})
 
     capture_thread.start()
     process_thread.start()
@@ -259,7 +259,7 @@ def stop_detection(device_id):
         logger.debug(f"Removing stop event for device {device_id}")
         stop_events.pop(device_id)
 
-    devices_collection.update_one({"_id": device_id}, {"$set": {"status": "disconnected"}})
+    devices_collection.update_one({"_id": device_id}, {"$set": {"status": "offline"}})
     logger.info(f"Stopped detection for device {device_id}. Total active devices: {len(capture_threads)}")
 
 def list_active_cameras():
