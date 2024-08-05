@@ -124,6 +124,16 @@ def process_frame(device_id, frame, results, update_callback=None):
                 "time": timestamp
             })
 
+            _, buffer = cv2.imencode('.jpg', crop_object)
+            encoded_frame = base64.b64encode(buffer).decode('utf-8')
+            data = {
+                "image": encoded_frame,
+                "device_id": device_id,
+                "file_name": cropped_frame_name,
+                "time": int(now.timestamp() * 1000)
+            }
+            asyncio.run(send_update(data, update_callback))
+
     if new_detected_uuids - current_uuids:
         current_uuids.update(new_detected_uuids)
     annotated_frame = box_annotator.annotate(frame.copy(), detections=human_detections)
@@ -134,17 +144,7 @@ def process_frame(device_id, frame, results, update_callback=None):
     date_time = now.strftime("%Y-%m-%d-%H-%M-%S")
     cv2.imwrite(os.path.join(annotated_output_dir, 'annotated-' + date_time + '.jpg'), annotated_frame)
     cv2.imwrite(os.path.join(heatmap_output_dir, 'heatmap-' + date_time + '.jpg'), heatmap_frame)
-
-    if update_callback:
-        _, buffer = cv2.imencode('.jpg', annotated_frame)
-        encoded_frame = base64.b64encode(buffer).decode('utf-8')
-        data = {
-            "image": encoded_frame,
-            "device_id": device_id,
-            "file_name": "test.jpg",
-            "time": int(now.timestamp() * 1000)
-        }
-        asyncio.run(send_update(data, update_callback))
+        
     return annotated_frame
 
 def capture_frames(rtsp_url, device_id):
