@@ -140,6 +140,7 @@ def process_frame(device_id, frame, results, update_callback=None):
         encoded_frame = base64.b64encode(buffer).decode('utf-8')
         data = {
             "image": encoded_frame,
+            "device_id": device_id,
             "file_name": "test.jpg",
             "time": int(now.timestamp() * 1000)
         }
