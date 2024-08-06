@@ -1,4 +1,4 @@
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException
 from multiprocessing import Pool
 from pymongo import MongoClient
 from loguru import logger
@@ -35,7 +35,9 @@ async def shutdown_event():
 async def start_detection_api(device_id: str):
     if device_id in is_running and is_running[device_id]:
         logger.warning(f"Detection already started for device {device_id}")
-        return {"status": "detection already started"}
+        raise HTTPException(status_code=400, detail={
+            "status": "detection already started"
+        })
 
     is_running[device_id] = True
     start_detection(device_id, send_updates)
@@ -46,7 +48,9 @@ async def start_detection_api(device_id: str):
 async def stop_detection_api(device_id: str):
     if device_id not in is_running or not is_running[device_id]:
         logger.warning(f"Detection not running for device {device_id}")
-        return {"status": "detection not running"}
+        raise HTTPException(status_code=400, detail={
+            "status": "detection not running"
+        })
 
     is_running[device_id] = False
     stop_detection(device_id)
