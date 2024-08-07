@@ -1,12 +1,22 @@
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException
+from fastapi.middleware.cors import CORSMiddleware
 from multiprocessing import Pool
 from pymongo import MongoClient
 from loguru import logger
 import json
-import asyncio
-from detection import start_detection, stop_detection, list_active_cameras
+from detection.detection import start_detection, stop_detection, list_active_cameras
 
 app = FastAPI()
+
+allowed_origins = ["http://localhost:5173"]
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=allowed_origins,
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 # MongoDB setup
 client = MongoClient('mongodb+srv://adam123:tntguy123@vnmc-database.r8b4uv0.mongodb.net/')
@@ -16,7 +26,7 @@ devices_collection = db['devices']
 
 pool = None
 is_running = {}
-connections = []
+connections = set()
 
 @app.on_event("startup")
 async def startup_event():
@@ -36,24 +46,26 @@ async def shutdown_event():
 async def start_detection_api(device_id: str):
     if device_id in is_running and is_running[device_id]:
         logger.warning(f"Detection already started for device {device_id}")
-        return {"status": "detection already started"}
+        raise HTTPException(status_code=400, detail={
+            "status": "detection already started"
+        })
 
     is_running[device_id] = True
     start_detection(device_id, send_updates)
     logger.info(f"Detection started for device {device_id}")
-    await broadcast_active_cameras()
     return {"status": "detection started"}
 
 @app.post("/stop-detection/{device_id}")
 async def stop_detection_api(device_id: str):
     if device_id not in is_running or not is_running[device_id]:
         logger.warning(f"Detection not running for device {device_id}")
-        return {"status": "detection not running"}
+        raise HTTPException(status_code=400, detail={
+            "status": "detection not running"
+        })
 
     is_running[device_id] = False
     stop_detection(device_id)
     logger.info(f"Detection stopped for device {device_id}")
-    await broadcast_active_cameras()
     return {"status": "detection stopped"}
 
 @app.get("/list-active-cameras")
@@ -65,9 +77,8 @@ async def list_active_cameras_api():
 @app.websocket("/ws")
 async def websocket_endpoint(websocket: WebSocket):
     await websocket.accept()
-    connections.append(websocket)
+    connections.add(websocket)
     try:
-        await broadcast_active_cameras(websocket)
         while True:
             await websocket.receive_text()
     except WebSocketDisconnect:
