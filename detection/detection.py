@@ -24,7 +24,7 @@ tracker = sv.ByteTrack(
 )
 
 # Set up annotators
-box_annotator = sv.BoxAnnotator(color_lookup=sv.ColorLookup.TRACK)
+box_annotator = sv.BoundingBoxAnnotator(color_lookup=sv.ColorLookup.TRACK)
 label_annotator = sv.LabelAnnotator()
 trace_annotator = sv.TraceAnnotator()
 heat_map_annotator = sv.HeatMapAnnotator(

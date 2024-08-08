@@ -47,7 +47,7 @@ def update_exit_timestamps(current_uuids, new_detected_uuids):
 def save_basic_image_metadata(uuid_label, device_id, cropped_frame_name, timestamp):
     try:
         images_collection.insert_one({
-            'uuid': uuid_label,
+            '_id': uuid_label,
             'device_id': device_id,
             'file_name': cropped_frame_name,
             'time': timestamp
