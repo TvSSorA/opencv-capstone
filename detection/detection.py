@@ -11,7 +11,7 @@ from loguru import logger
 import asyncio
 
 from config import Config
-from detection.db_interactions import save_image_metadata, update_device_status, get_rtsp_url
+from detection.db_interactions import save_basic_image_metadata, update_device_status, get_rtsp_url
 from detection.image_processing import ensure_directory_exists, save_images, create_annotated_frames, send_update_to_clients
 
 # Initialize the YOLO model
@@ -100,7 +100,7 @@ async def process_frame(device_id, frame, results, update_callback=None):
                     frame, box, uuid_label, output_dir, whole_frame_dir, single_box_annotated_dir, human_detections
                 )
 
-                save_image_metadata(uuid_label, device_id, crop_path, int(datetime.now().timestamp() * 1000))
+                save_basic_image_metadata(uuid_label, device_id, crop_path, int(datetime.now().timestamp() * 1000))
                 saved_images_ids.add(uuid_label)
 
         if new_detected_uuids - current_uuids:
@@ -110,7 +110,7 @@ async def process_frame(device_id, frame, results, update_callback=None):
 
         # Only call send_update_to_clients if uuid_label and whole_frame_path have been assigned
         if uuid_label and whole_frame_path and crop_path:
-            await send_update_to_clients(device_id, annotated_frame, uuid_label, whole_frame_path, crop_path, single_box_path, heatmap_output_dir, date_time, update_callback)
+            await send_update_to_clients(device_id, annotated_frame, uuid_label, crop_path, update_callback)
 
     except Exception as e:
         logger.error(f"Error processing frame for device {device_id}: {e}")
