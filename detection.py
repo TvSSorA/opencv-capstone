@@ -14,6 +14,20 @@ from config import Config
 from detection.db_interactions import save_basic_image_metadata, update_device_status, get_rtsp_url
 from detection.image_processing import ensure_directory_exists, save_images, create_annotated_frames, send_update_to_clients
 
+# Configuration
+class CFG:
+    MODEL_WEIGHTS = 'weights/best.pt'  # yolov8s.pt, yolov9c.pt, yolov9e.pt
+    CONFIDENCE = 0.35
+    IOU = 0.5
+    HEATMAP_ALPHA = 0.2
+    RADIUS = 40
+    TRACK_THRESH = 0.35
+    TRACK_SECONDS = 5
+    MATCH_THRESH = 0.9999
+    FRAME_RATE = 20
+    MAX_RETRIES = 5
+    RETRY_DELAY = 5  # seconds to retry connection
+
 # Initialize the YOLO model
 model = YOLO(Config.MODEL_WEIGHTS)
 tracker = sv.ByteTrack(
