@@ -8,18 +8,11 @@ from datetime import datetime
 import threading
 import queue
 from loguru import logger
-from pymongo import MongoClient
-import base64
 import asyncio
 
-# Import utils
-from utils import logger
-
-# MongoDB setup
-client = MongoClient('mongodb+srv://adam123:tntguy123@vnmc-database.r8b4uv0.mongodb.net/')
-db = client['capstone-project']
-collection = db['images']
-devices_collection = db['devices']
+from config import Config
+from detection.db_interactions import save_basic_image_metadata, update_device_status, get_rtsp_url
+from detection.image_processing import ensure_directory_exists, save_images, create_annotated_frames, send_update_to_clients
 
 # Configuration
 class CFG:
@@ -36,29 +29,29 @@ class CFG:
     RETRY_DELAY = 5  # seconds to retry connection
 
 # Initialize the YOLO model
-model = YOLO(CFG.MODEL_WEIGHTS)
+model = YOLO(Config.MODEL_WEIGHTS)
 tracker = sv.ByteTrack(
-    track_activation_threshold=CFG.TRACK_THRESH,
-    lost_track_buffer=CFG.TRACK_SECONDS * CFG.FRAME_RATE,
-    minimum_matching_threshold=CFG.MATCH_THRESH,
-    frame_rate=CFG.FRAME_RATE
+    track_activation_threshold=Config.TRACK_THRESH,
+    lost_track_buffer=Config.TRACK_SECONDS * Config.FRAME_RATE,
+    minimum_matching_threshold=Config.MATCH_THRESH,
+    frame_rate=Config.FRAME_RATE
 )
 
 # Set up annotators
-box_annotator = sv.BoundingBoxAnnotator(color_lookup=sv.ColorLookup.TRACK)
+box_annotator = sv.BoxAnnotator(color_lookup=sv.ColorLookup.TRACK)
 label_annotator = sv.LabelAnnotator()
 trace_annotator = sv.TraceAnnotator()
 heat_map_annotator = sv.HeatMapAnnotator(
     position=sv.Position.BOTTOM_CENTER,
-    opacity=CFG.HEATMAP_ALPHA,
-    radius=CFG.RADIUS,
+    opacity=Config.HEATMAP_ALPHA,
+    radius=Config.RADIUS,
     kernel_size=25,
     top_hue=0,
     low_hue=125
 )
 
 # Directories to save images
-images_dir = 'outputs'
+images_dir = Config.OUTPUT_DIR
 os.makedirs(images_dir, exist_ok=True)
 
 tracker_id_to_uuid = {}
@@ -77,100 +70,89 @@ def get_uuid_for_tracker_id(tracker_id):
         tracker_id_to_uuid[tracker_id] = new_uuid
     return tracker_id_to_uuid[tracker_id]
 
-def ensure_directory_exists(directory):
-    if not os.path.exists(directory):
-        os.makedirs(directory)
-
 async def send_update(data, update_callback):
     await update_callback(data)
 
-def process_frame(device_id, frame, results, update_callback=None):
-    detections = sv.Detections.from_ultralytics(results)
-    human_detections = detections[detections.class_id == 0]
-    human_detections = tracker.update_with_detections(human_detections)
-    labels = [f"{get_uuid_for_tracker_id(tracker_id)}" for tracker_id in human_detections.tracker_id]
-    min_length = min(len(human_detections.xyxy.tolist()), len(labels))
-    new_detected_uuids = set()
-    current_date = datetime.now().strftime("%Y-%m-%d")
-    output_dir = os.path.join(images_dir, 'cropped_images', device_id, current_date)
-    annotated_output_dir = os.path.join(images_dir, 'annotated_images', device_id, current_date)
-    whole_frame_dir = os.path.join(images_dir, 'whole_frames', device_id, current_date)
-    heatmap_output_dir = os.path.join(images_dir, 'heatmap_outputs', device_id, current_date)
-    ensure_directory_exists(output_dir)
-    ensure_directory_exists(annotated_output_dir)
-    ensure_directory_exists(whole_frame_dir)
-    ensure_directory_exists(heatmap_output_dir)
+async def process_frame(device_id, frame, results, update_callback=None):
+    try:
+        logger.info(f"Processing frame for device {device_id}")
+        detections = sv.Detections.from_ultralytics(results)
+        human_detections = detections[detections.class_id == 0]
+        human_detections = tracker.update_with_detections(human_detections)
+        labels = [f"{get_uuid_for_tracker_id(tracker_id)}" for tracker_id in human_detections.tracker_id]
+        min_length = min(len(human_detections.xyxy.tolist()), len(labels))
+        new_detected_uuids = set()
+        current_date = datetime.now().strftime("%Y-%m-%d")
 
-    for i in range(min_length):
-        box = human_detections.xyxy.tolist()[i]
-        uuid_label = labels[i]
-        new_detected_uuids.add(uuid_label)
-        if uuid_label not in saved_images_ids:
-            x1, y1, x2, y2 = box
-            crop_object = frame[int(y1):int(y2), int(x1):int(x2)]
-            now = datetime.now()
-            timestamp = int(now.timestamp() * 1000)
-            date_time = now.strftime("%Y-%m-%d-%H-%M-%S")
-            cropped_frame_name = f"{uuid_label}-{date_time}.jpg"
-            whole_frame_name = f"{uuid_label}-whole-{date_time}.jpg"
-            cv2.imwrite(os.path.join(output_dir, cropped_frame_name), crop_object)
-            cv2.imwrite(os.path.join(whole_frame_dir, whole_frame_name), frame)
-            saved_images_ids.add(uuid_label)
+        output_dir = os.path.join(images_dir, 'cropped_images', device_id, current_date)
+        annotated_output_dir = os.path.join(images_dir, 'annotated_images', device_id, current_date)
+        whole_frame_dir = os.path.join(images_dir, 'whole_frames', device_id, current_date)
+        heatmap_output_dir = os.path.join(images_dir, 'heatmap_outputs', device_id, current_date)
+        single_box_annotated_dir = os.path.join(images_dir, 'single_box_annotated', device_id, current_date)
 
-            collection.insert_one({
-                "_id": uuid_label,
-                "device_id": device_id,
-                "file_name": cropped_frame_name,
-                "time": timestamp
-            })
+        ensure_directory_exists(output_dir)
+        ensure_directory_exists(annotated_output_dir)
+        ensure_directory_exists(whole_frame_dir)
+        ensure_directory_exists(heatmap_output_dir)
+        ensure_directory_exists(single_box_annotated_dir)
 
-            _, buffer = cv2.imencode('.jpg', crop_object)
-            encoded_frame = base64.b64encode(buffer).decode('utf-8')
-            data = {
-                "image": encoded_frame,
-                "device_id": device_id,
-                "file_name": cropped_frame_name,
-                "time": int(now.timestamp() * 1000)
-            }
-            asyncio.run(send_update(data, update_callback))
+        uuid_label = None  # Initialize uuid_label to None
+        whole_frame_path = None  # Initialize whole_frame_path to None
+        crop_path = None  # Initialize crop_path to None
+        single_box_path = None  # Initialize single_box_path to None
+        date_time = None  # Initialize date_time to None
 
-    if new_detected_uuids - current_uuids:
-        current_uuids.update(new_detected_uuids)
-    annotated_frame = box_annotator.annotate(frame.copy(), detections=human_detections)
-    annotated_frame = label_annotator.annotate(annotated_frame, detections=human_detections, labels=labels)
-    annotated_frame = trace_annotator.annotate(annotated_frame, detections=human_detections)
-    heatmap_frame = heat_map_annotator.annotate(frame.copy(), detections=human_detections)
-    now = datetime.now()
-    date_time = now.strftime("%Y-%m-%d-%H-%M-%S")
-    cv2.imwrite(os.path.join(annotated_output_dir, 'annotated-' + date_time + '.jpg'), annotated_frame)
-    cv2.imwrite(os.path.join(heatmap_output_dir, 'heatmap-' + date_time + '.jpg'), heatmap_frame)
-        
-    return annotated_frame
+        for i in range(min_length):
+            box = human_detections.xyxy[i]
+            uuid_label = labels[i]
+            new_detected_uuids.add(uuid_label)
+            logger.info(f"Detected person {uuid_label} at position {box}")
+
+            if uuid_label not in saved_images_ids:
+                logger.info(f"New person detected: {uuid_label}. Saving images.")
+                crop_path, whole_frame_path, single_box_path, date_time = save_images(
+                    frame, box, uuid_label, output_dir, whole_frame_dir, single_box_annotated_dir, human_detections
+                )
+
+                save_basic_image_metadata(uuid_label, device_id, crop_path, int(datetime.now().timestamp() * 1000))
+                saved_images_ids.add(uuid_label)
+
+        if new_detected_uuids - current_uuids:
+            current_uuids.update(new_detected_uuids)
+
+        annotated_frame = create_annotated_frames(frame, human_detections, labels, annotated_output_dir, heatmap_output_dir, box_annotator, label_annotator, trace_annotator, heat_map_annotator)
+
+        # Only call send_update_to_clients if uuid_label and whole_frame_path have been assigned
+        if uuid_label and whole_frame_path and crop_path:
+            await send_update_to_clients(device_id, annotated_frame, uuid_label, crop_path, update_callback)
+
+    except Exception as e:
+        logger.error(f"Error processing frame for device {device_id}: {e}")
 
 def capture_frames(rtsp_url, device_id):
     logger.info(f"Starting frame capture for device {device_id} with URL {rtsp_url}")
     retries = 0
-    while retries < CFG.MAX_RETRIES:
+    while retries < Config.MAX_RETRIES:
         cap = cv2.VideoCapture(rtsp_url)
         if not cap.isOpened():
-            logger.error(f"Failed to open stream for device {device_id}, retrying... ({retries + 1}/{CFG.MAX_RETRIES})")
+            logger.error(f"Failed to open stream for device {device_id}, retrying... ({retries + 1}/{Config.MAX_RETRIES})")
             retries += 1
-            time.sleep(CFG.RETRY_DELAY)
+            time.sleep(Config.RETRY_DELAY)
             continue
 
         while cap.isOpened() and not stop_events[device_id].is_set():
             ret, frame = cap.read()
             if not ret:
-                logger.warning(f"Failed to read frame for device {device_id}, retrying... ({retries + 1}/{CFG.MAX_RETRIES})")
+                logger.warning(f"Failed to read frame for device {device_id}, retrying... ({retries + 1}/{Config.MAX_RETRIES})")
                 retries += 1
-                time.sleep(CFG.RETRY_DELAY)
+                time.sleep(Config.RETRY_DELAY)
                 break
 
             if frame_queues[device_id].full():
                 continue
             frame_queues[device_id].put(frame)
 
-        if retries >= CFG.MAX_RETRIES:
+        if retries >= Config.MAX_RETRIES:
             logger.error(f"Max retries reached for device {device_id}. Stopping capture.")
             break
 
@@ -186,22 +168,16 @@ def detect_and_process_frames(device_id, update_callback=None):
 
         current_time = time.time()
         elapsed_time = current_time - last_frame_time
-        if elapsed_time < 1 / CFG.FRAME_RATE:
-            time.sleep(1 / CFG.FRAME_RATE - elapsed_time)
+        if elapsed_time < 1 / Config.FRAME_RATE:
+            time.sleep(1 / Config.FRAME_RATE - elapsed_time)
 
         frame = frame_queues[device_id].get()
         results = model.predict(source=frame, show=False, stream=True, classes=[0], imgsz=640)
         for result in results:
-            annotated_frame = process_frame(device_id, frame, result, update_callback)
-            if annotated_frame is not None:
-                logger.info(f"New frame processed and saved for device {device_id}.")
+            asyncio.run(process_frame(device_id, frame, result, update_callback))
         last_frame_time = current_time
 
     logger.info(f"Stopped frame processing for device {device_id}")
-
-def get_rtsp_url(device_id):
-    device = devices_collection.find_one({"_id": device_id})
-    return device.get("rtsp_url") if device else None
 
 def start_detection(device_id, update_callback=None):
     rtsp_url = get_rtsp_url(device_id)
@@ -217,7 +193,7 @@ def start_detection(device_id, update_callback=None):
     capture_threads[device_id] = capture_thread
     process_threads[device_id] = process_thread
 
-    devices_collection.update_one({"_id": device_id}, {"$set": {"status": "online"}})
+    update_device_status(device_id, "online")
 
     capture_thread.start()
     process_thread.start()
@@ -260,7 +236,7 @@ def stop_detection(device_id):
         logger.debug(f"Removing stop event for device {device_id}")
         stop_events.pop(device_id)
 
-    devices_collection.update_one({"_id": device_id}, {"$set": {"status": "offline"}})
+    update_device_status(device_id, "offline")
     logger.info(f"Stopped detection for device {device_id}. Total active devices: {len(capture_threads)}")
 
 def list_active_cameras():

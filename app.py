@@ -4,7 +4,7 @@ from multiprocessing import Pool
 from pymongo import MongoClient
 from loguru import logger
 import json
-from detection import start_detection, stop_detection, list_active_cameras
+from detection.detection import start_detection, stop_detection, list_active_cameras
 
 app = FastAPI()
 
