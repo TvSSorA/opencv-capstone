@@ -9,6 +9,7 @@ db = client['capstone-project']
 images_collection = db['images']
 devices_collection = db['devices']
 
+"""
 def save_image_metadata(uuid_label, device_id, crop_path, whole_frame_path, single_box_path):
     try:
         crop_url = f"/static/{os.path.relpath(crop_path, 'static')}"
@@ -28,7 +29,9 @@ def save_image_metadata(uuid_label, device_id, crop_path, whole_frame_path, sing
         logger.info(f"Saved URLs in MongoDB for person {uuid_label} with device ID {device_id}")
     except Exception as e:
         logger.error(f"Error saving URLs in MongoDB for person {uuid_label}: {e}")
+"""
 
+"""
 def update_exit_timestamps(current_uuids, new_detected_uuids):
     try:
         for uuid_label in current_uuids - new_detected_uuids:
@@ -39,6 +42,7 @@ def update_exit_timestamps(current_uuids, new_detected_uuids):
             logger.info(f"Updated exit timestamp for person {uuid_label}")
     except Exception as e:
         logger.error(f"Error updating exit timestamps: {e}")
+"""
 
 def save_basic_image_metadata(uuid_label, device_id, cropped_frame_name, timestamp):
     try:

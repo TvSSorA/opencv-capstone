@@ -68,7 +68,7 @@ async def send_update(data, update_callback):
     except Exception as e:
         logger.error(f"Failed to send update: {e}")
 
-async def send_update_to_clients(device_id, annotated_frame, uuid_label, whole_frame_path, crop_path, single_box_path, heatmap_output_dir, date_time, update_callback):
+async def send_update_to_clients(device_id, annotated_frame, uuid_label, crop_path, update_callback):
     try:
         # Encode annotated frame
         _, annotated_buffer = cv2.imencode('.jpg', annotated_frame)
@@ -80,15 +80,11 @@ async def send_update_to_clients(device_id, annotated_frame, uuid_label, whole_f
         encoded_crop_frame = base64.b64encode(crop_buffer).decode('utf-8')
 
         data = {
+            "image": encoded_crop_frame,
+            "annotated": encoded_annotated_frame,
             "device_id": device_id,
-            "uuid": uuid_label,
-            "entry_timestamp": datetime.now().isoformat(),
-            "whole_frame_path": whole_frame_path,
-            "crop_frame_path": crop_path,
-            "single_box_path": single_box_path,
-            "heatmap_output_dir": os.path.join(heatmap_output_dir, 'heatmap-' + date_time + '.jpg'),
-            "annotated_frame": encoded_annotated_frame,
-            "crop_frame": encoded_crop_frame
+            "file_name": crop_path,
+            "time": int(datetime.now().timestamp() * 1000)
         }
         await update_callback(data)
     except Exception as e:
