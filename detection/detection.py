@@ -11,8 +11,8 @@ from loguru import logger
 import asyncio
 
 from config import Config
-from detection.db_interactions import save_basic_image_metadata, update_device_status, get_rtsp_url
-from detection.image_processing import ensure_directory_exists, save_images, create_annotated_frames, send_update_to_clients
+from detection.db_interactions import save_basic_image_metadata, save_annotated_frame_metadata, update_device_status, get_rtsp_url
+from detection.image_processing import ensure_directory_exists, save_images, send_update_to_clients
 
 # Initialize the YOLO model
 model = YOLO(Config.MODEL_WEIGHTS)
@@ -83,10 +83,9 @@ async def process_frame(device_id, frame, results, update_callback=None):
         ensure_directory_exists(single_box_annotated_dir)
 
         uuid_label = None  # Initialize uuid_label to None
-        whole_frame_path = None  # Initialize whole_frame_path to None
         crop_path = None  # Initialize crop_path to None
         single_box_path = None  # Initialize single_box_path to None
-        date_time = None  # Initialize date_time to None
+        single_box_frame = None  # Initialize date_time to None
 
         for i in range(min_length):
             box = human_detections.xyxy[i]
@@ -96,21 +95,17 @@ async def process_frame(device_id, frame, results, update_callback=None):
 
             if uuid_label not in saved_images_ids:
                 logger.info(f"New person detected: {uuid_label}. Saving images.")
-                crop_path, whole_frame_path, single_box_path, date_time = save_images(
+                crop_path, single_box_path, single_box_frame = save_images(
                     frame, box, uuid_label, output_dir, whole_frame_dir, single_box_annotated_dir, human_detections
                 )
 
                 save_basic_image_metadata(uuid_label, device_id, crop_path, int(datetime.now().timestamp() * 1000))
+                save_annotated_frame_metadata(uuid_label, device_id, single_box_path)
+                await send_update_to_clients(device_id, single_box_frame, uuid_label, crop_path, update_callback)
                 saved_images_ids.add(uuid_label)
 
         if new_detected_uuids - current_uuids:
             current_uuids.update(new_detected_uuids)
-
-        annotated_frame = create_annotated_frames(frame, human_detections, labels, annotated_output_dir, heatmap_output_dir, box_annotator, label_annotator, trace_annotator, heat_map_annotator)
-
-        # Only call send_update_to_clients if uuid_label and whole_frame_path have been assigned
-        if uuid_label and whole_frame_path and crop_path:
-            await send_update_to_clients(device_id, annotated_frame, uuid_label, crop_path, update_callback)
 
     except Exception as e:
         logger.error(f"Error processing frame for device {device_id}: {e}")

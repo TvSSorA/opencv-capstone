@@ -38,7 +38,7 @@ def save_images(frame, box, uuid_label, output_dir, whole_frame_dir, single_box_
         cv2.imwrite(single_box_path, single_box_frame)
         logger.info(f"Saved single box annotated image at {single_box_path}")
 
-        return crop_path, whole_frame_path, single_box_path, date_time
+        return crop_path, single_box_path, single_box_frame
     except Exception as e:
         logger.error(f"Error saving images for person {uuid_label}: {e}")
         return None, None, None, None
