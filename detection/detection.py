@@ -113,32 +113,53 @@ async def process_frame(device_id, frame, results, update_callback=None):
 def capture_frames(rtsp_url, device_id):
     logger.info(f"Starting frame capture for device {device_id} with URL {rtsp_url}")
     retries = 0
+    connected = False
+
     while retries < Config.MAX_RETRIES:
-        cap = cv2.VideoCapture(rtsp_url)
-        if not cap.isOpened():
+        start_time = time.time()
+        cap = None
+
+        # Create a thread to handle the VideoCapture opening
+        def open_video_capture():
+            nonlocal cap
+            cap = cv2.VideoCapture(rtsp_url, cv2.CAP_FFMPEG)
+
+        capture_thread = threading.Thread(target=open_video_capture)
+        capture_thread.start()
+        capture_thread.join(timeout=10)  # Timeout after 10 seconds
+
+        # Check if the connection was successful
+        if cap is not None and cap.isOpened():
+            connected = True
+            logger.info(f"Successfully connected to stream for device {device_id}")
+            break
+        else:
             logger.error(f"Failed to open stream for device {device_id}, retrying... ({retries + 1}/{Config.MAX_RETRIES})")
             retries += 1
             time.sleep(Config.RETRY_DELAY)
-            continue
 
-        while cap.isOpened() and not stop_events[device_id].is_set():
-            ret, frame = cap.read()
-            if not ret:
-                logger.warning(f"Failed to read frame for device {device_id}, retrying... ({retries + 1}/{Config.MAX_RETRIES})")
-                retries += 1
-                time.sleep(Config.RETRY_DELAY)
-                break
+    if not connected:
+        logger.error(f"Max retries reached for device {device_id}. Stopping capture.")
+        return False
 
-            if frame_queues[device_id].full():
-                continue
-            frame_queues[device_id].put(frame)
+    # Custom timeout handling for reading frames
+    while cap.isOpened() and not stop_events[device_id].is_set():
+        ret, frame = cap.read()
+        elapsed_time = time.time() - start_time
 
-        if retries >= Config.MAX_RETRIES:
-            logger.error(f"Max retries reached for device {device_id}. Stopping capture.")
+        if not ret or elapsed_time > 10:  # 10 seconds timeout for reading frames
+            logger.warning(f"Frame read timeout for device {device_id}, retrying... ({retries + 1}/{Config.MAX_RETRIES})")
+            retries += 1
+            time.sleep(Config.RETRY_DELAY)
             break
+
+        if frame_queues[device_id].full():
+            continue
+        frame_queues[device_id].put(frame)
 
     cap.release()
     logger.info(f"Stopped frame capture for device {device_id}")
+    update_device_status(device_id, "offline")
 
 def detect_and_process_frames(device_id, update_callback=None):
     logger.info(f"Starting frame processing for device {device_id}")
@@ -160,6 +181,7 @@ def detect_and_process_frames(device_id, update_callback=None):
 
     logger.info(f"Stopped frame processing for device {device_id}")
 
+
 def start_detection(device_id, update_callback=None):
     rtsp_url = get_rtsp_url(device_id)
     if not rtsp_url:
@@ -168,19 +190,35 @@ def start_detection(device_id, update_callback=None):
 
     frame_queues[device_id] = queue.Queue(maxsize=10)
     stop_events[device_id] = threading.Event()
+
+    # Start the capture thread and wait for it to complete
     capture_thread = threading.Thread(target=capture_frames, args=(rtsp_url, device_id))
-    process_thread = threading.Thread(target=detect_and_process_frames, args=(device_id, update_callback))
-
-    capture_threads[device_id] = capture_thread
-    process_threads[device_id] = process_thread
-
-    update_device_status(device_id, "online")
-
     capture_thread.start()
-    process_thread.start()
+    capture_thread.join()
 
-    active_cameras[device_id] = rtsp_url
-    logger.info(f"Started detection for device {device_id}. Total active devices: {len(capture_threads)}")
+    # Check if the connection was successful by verifying if the device is connected
+    if device_id in frame_queues and not stop_events[device_id].is_set():
+        if frame_queues[device_id].empty():  # No frames were captured, connection likely failed
+            logger.error(f"Failed to start detection for device {device_id} due to connection issues")
+            stop_events.pop(device_id)
+            frame_queues.pop(device_id)
+            return
+        else:
+            # Update device status to online only if frames were successfully captured
+            update_device_status(device_id, "online")
+
+            # Start the processing thread
+            process_thread = threading.Thread(target=detect_and_process_frames, args=(device_id, update_callback))
+            process_threads[device_id] = process_thread
+            process_thread.start()
+
+            active_cameras[device_id] = rtsp_url
+            logger.info(f"Started detection for device {device_id}. Total active devices: {len(capture_threads)}")
+    else:
+        logger.error(f"Failed to start detection for device {device_id} due to connection issues")
+        stop_events.pop(device_id)
+        if device_id in frame_queues:
+            frame_queues.pop(device_id)
 
 def stop_detection(device_id):
     logger.info(f"Attempting to stop detection for device {device_id}")
