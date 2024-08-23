@@ -56,11 +56,14 @@ def save_basic_image_metadata(uuid_label, device_id, cropped_frame_name, timesta
     except Exception as e:
         logger.error(f"Error saving basic image metadata in MongoDB for person {uuid_label}: {e}")
 
-def save_annotated_frame_metadata(uuid_label, device_id, annotated_frame_name):
+def save_annotated_frame_metadata(uuid_label, device_id, annotated_frame_name, heatmap_frame_name):
     try:
         devices_collection.update_one(
             {"_id": device_id},
-            {"$set": {"latest_annotated": annotated_frame_name}}
+            {"$set": {
+                "latest_annotated": annotated_frame_name,
+                "latest_heatmap": heatmap_frame_name
+            }}
         )
     except Exception as e:
         logger.error(f"Error saving annotated frame metadata in MongoDB for person {uuid_label}: {e}")
