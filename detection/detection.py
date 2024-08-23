@@ -12,7 +12,7 @@ import asyncio
 
 from config import Config
 from detection.db_interactions import save_basic_image_metadata, save_annotated_frame_metadata, update_device_status, get_rtsp_url
-from detection.image_processing import ensure_directory_exists, save_images, send_cropped_frame
+from detection.image_processing import ensure_directory_exists, save_images, create_annotated_frames, send_cropped_frame, send_annotated_and_heatmap
 
 # Initialize the YOLO model
 model = YOLO(Config.MODEL_WEIGHTS)
@@ -103,6 +103,12 @@ async def process_frame(device_id, frame, results, update_callback=None):
 
         if new_detected_uuids - current_uuids:
             current_uuids.update(new_detected_uuids)
+
+        annotated_frame, heatmap_frame, annotated_file_name, heatmap_file_name = create_annotated_frames(frame, human_detections, labels, annotated_output_dir, heatmap_output_dir, box_annotator, label_annotator, trace_annotator, heat_map_annotator)
+        
+        if uuid_label and crop_path:
+            save_annotated_frame_metadata(uuid_label, device_id, annotated_file_name, heatmap_file_name)
+            await send_annotated_and_heatmap(device_id, uuid_label, annotated_frame, heatmap_frame, update_callback)
 
     except Exception as e:
         logger.error(f"Error processing frame for device {device_id}: {e}")

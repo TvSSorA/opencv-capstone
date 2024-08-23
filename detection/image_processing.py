@@ -52,11 +52,13 @@ def create_annotated_frames(frame, human_detections, labels, annotated_output_di
 
         now = datetime.now()
         date_time = now.strftime("%Y-%m-%d-%H-%M-%S")
-        cv2.imwrite(os.path.join(annotated_output_dir, 'annotated-' + date_time + '.jpg'), annotated_frame)
-        cv2.imwrite(os.path.join(heatmap_output_dir, 'heatmap-' + date_time + '.jpg'), heatmap_frame)
+        annotated_file_name = os.path.join(annotated_output_dir, 'annotated-' + date_time + '.jpg')
+        heatmap_file_name = os.path.join(heatmap_output_dir, 'heatmap-' + date_time + '.jpg')
+        cv2.imwrite(annotated_file_name, annotated_frame)
+        cv2.imwrite(heatmap_file_name, heatmap_frame)
         logger.info(f"Saved annotated frame and heatmap frame for time {date_time}")
 
-        return annotated_frame
+        return annotated_frame, heatmap_frame, annotated_file_name, heatmap_file_name
     except Exception as e:
         logger.error(f"Error creating annotated frames: {e}")
         return None
@@ -85,3 +87,23 @@ async def send_cropped_frame(device_id, uuid_label, crop_path, update_callback):
         await update_callback(data)
     except Exception as e:
         logger.error(f"Error sending cropped frame to person {uuid_label}: {e}")
+
+async def send_annotated_and_heatmap(device_id, uuid_label, annotated_frame, heatmap_frame, update_callback):
+    try:
+        # Encode annotated frame
+        _, annotated_buffer = cv2.imencode('.jpg', annotated_frame)
+        encoded_annotated_frame = base64.b64encode(annotated_buffer).decode('utf-8')
+
+        # Encode heatmap frame
+        _, heatmap_buffer = cv2.imencode('.jpg', heatmap_frame)
+        encoded_heatmap_frame = base64.b64encode(heatmap_buffer).decode('utf-8')
+
+        data = {
+            "type": "annotated",
+            "annotated_image": encoded_annotated_frame,
+            "heatmap_image": encoded_heatmap_frame,
+            "device_id": device_id
+        }
+        await update_callback(data)
+    except Exception as e:
+        logger.error(f"Error sending annotated frame and heatmap to person {uuid_label}: {e}")
