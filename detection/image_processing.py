@@ -38,7 +38,7 @@ def save_images(frame, box, uuid_label, output_dir, whole_frame_dir, single_box_
         cv2.imwrite(single_box_path, single_box_frame)
         logger.info(f"Saved single box annotated image at {single_box_path}")
 
-        return crop_path, single_box_path, single_box_frame
+        return crop_path
     except Exception as e:
         logger.error(f"Error saving images for person {uuid_label}: {e}")
         return None, None, None, None
@@ -68,24 +68,20 @@ async def send_update(data, update_callback):
     except Exception as e:
         logger.error(f"Failed to send update: {e}")
 
-async def send_update_to_clients(device_id, annotated_frame, uuid_label, crop_path, update_callback):
+async def send_cropped_frame(device_id, uuid_label, crop_path, update_callback):
     try:
-        # Encode annotated frame
-        _, annotated_buffer = cv2.imencode('.jpg', annotated_frame)
-        encoded_annotated_frame = base64.b64encode(annotated_buffer).decode('utf-8')
-
         # Read and encode cropped frame
         crop_frame = cv2.imread(crop_path)
         _, crop_buffer = cv2.imencode('.jpg', crop_frame)
         encoded_crop_frame = base64.b64encode(crop_buffer).decode('utf-8')
 
         data = {
+            "type": "cropped",
             "image": encoded_crop_frame,
-            "annotated": encoded_annotated_frame,
             "device_id": device_id,
             "file_name": crop_path,
             "time": int(datetime.now().timestamp() * 1000)
         }
         await update_callback(data)
     except Exception as e:
-        logger.error(f"Error sending update to clients for person {uuid_label}: {e}")
+        logger.error(f"Error sending cropped frame to person {uuid_label}: {e}")
