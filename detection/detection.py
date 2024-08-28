@@ -59,89 +59,120 @@ def get_uuid_for_tracker_id(tracker_id):
 async def send_update(data, update_callback):
     await update_callback(data)
 
-async def process_frame(device_id, frame, results, update_callback=None):
-    try:
-        logger.info(f"Processing frame for device {device_id}")
-        detections = sv.Detections.from_ultralytics(results)
-        human_detections = detections[detections.class_id == 0]
-        human_detections = tracker.update_with_detections(human_detections)
-        labels = [f"{get_uuid_for_tracker_id(tracker_id)}" for tracker_id in human_detections.tracker_id]
-        min_length = min(len(human_detections.xyxy.tolist()), len(labels))
-        new_detected_uuids = set()
-        current_date = datetime.now().strftime("%Y-%m-%d")
-
-        output_dir = os.path.join(images_dir, 'cropped_images', device_id, current_date)
-        annotated_output_dir = os.path.join(images_dir, 'annotated_images', device_id, current_date)
-        whole_frame_dir = os.path.join(images_dir, 'whole_frames', device_id, current_date)
-        heatmap_output_dir = os.path.join(images_dir, 'heatmap_outputs', device_id, current_date)
-        single_box_annotated_dir = os.path.join(images_dir, 'single_box_annotated', device_id, current_date)
-
-        ensure_directory_exists(output_dir)
-        ensure_directory_exists(annotated_output_dir)
-        ensure_directory_exists(whole_frame_dir)
-        ensure_directory_exists(heatmap_output_dir)
-        ensure_directory_exists(single_box_annotated_dir)
-
-        uuid_label = None  # Initialize uuid_label to None
-        crop_path = None  # Initialize crop_path to None
-
-        for i in range(min_length):
-            box = human_detections.xyxy[i]
-            uuid_label = labels[i]
-            new_detected_uuids.add(uuid_label)
-            logger.info(f"Detected person {uuid_label} at position {box}")
-
-            if uuid_label not in saved_images_ids:
-                logger.info(f"New person detected: {uuid_label}. Saving images.")
-                crop_path = save_images(
-                    frame, box, uuid_label, output_dir, whole_frame_dir, single_box_annotated_dir, human_detections
-                )
-
-                save_basic_image_metadata(uuid_label, device_id, crop_path, int(datetime.now().timestamp() * 1000))
-                await send_cropped_frame(device_id, uuid_label, crop_path, update_callback)
-                saved_images_ids.add(uuid_label)
-
-        if new_detected_uuids - current_uuids:
-            current_uuids.update(new_detected_uuids)
-
-        annotated_frame, heatmap_frame, annotated_file_name, heatmap_file_name = create_annotated_frames(frame, human_detections, labels, annotated_output_dir, heatmap_output_dir, box_annotator, label_annotator, trace_annotator, heat_map_annotator)
-        
-        if uuid_label and crop_path:
-            save_annotated_frame_metadata(uuid_label, device_id, annotated_file_name, heatmap_file_name)
-            await send_annotated_and_heatmap(device_id, uuid_label, annotated_frame, heatmap_frame, update_callback)
-
-    except Exception as e:
-        logger.error(f"Error processing frame for device {device_id}: {e}")
 
 def capture_frames(rtsp_url, device_id):
     logger.info(f"Starting frame capture for device {device_id} with URL {rtsp_url}")
     retries = 0
+    cap = None
+
     while retries < Config.MAX_RETRIES:
         cap = cv2.VideoCapture(rtsp_url)
         if not cap.isOpened():
-            logger.error(f"Failed to open stream for device {device_id}, retrying... ({retries + 1}/{Config.MAX_RETRIES})")
+            logger.error(
+                f"Failed to open stream for device {device_id}, retrying... ({retries + 1}/{Config.MAX_RETRIES})")
             retries += 1
             time.sleep(Config.RETRY_DELAY)
             continue
 
-        while cap.isOpened() and not stop_events[device_id].is_set():
-            ret, frame = cap.read()
-            if not ret:
-                logger.warning(f"Failed to read frame for device {device_id}, retrying... ({retries + 1}/{Config.MAX_RETRIES})")
-                retries += 1
-                time.sleep(Config.RETRY_DELAY)
-                break
-
-            if frame_queues[device_id].full():
-                continue
-            frame_queues[device_id].put(frame)
-
-        if retries >= Config.MAX_RETRIES:
-            logger.error(f"Max retries reached for device {device_id}. Stopping capture.")
+        # Check if the camera is providing valid frames
+        ret, frame = cap.read()
+        if ret:
+            logger.info(f"Successfully connected to device {device_id}.")
+            # Update status to online only after successfully capturing a valid frame
+            update_device_status(device_id, "online")
             break
+        else:
+            logger.error(
+                f"Failed to read initial frame for device {device_id}, retrying... ({retries + 1}/{Config.MAX_RETRIES})")
+            retries += 1
+            time.sleep(Config.RETRY_DELAY)
+
+    if retries >= Config.MAX_RETRIES or not cap.isOpened():
+        logger.error(f"Max retries reached for device {device_id}. Connection failed.")
+        if cap:
+            cap.release()
+        update_device_status(device_id, "offline")
+        stop_events[device_id].set()  # Signal to stop detection
+        return  # Early exit if connection failed
+
+    # Proceed with frame capturing
+    while cap.isOpened() and not stop_events[device_id].is_set():
+        ret, frame = cap.read()
+        if not ret:
+            logger.warning(f"Failed to read frame for device {device_id}, retrying...")
+            retries += 1
+            time.sleep(Config.RETRY_DELAY)
+            if retries >= Config.MAX_RETRIES:
+                logger.error(f"Max retries reached for device {device_id}. Stopping capture.")
+                update_device_status(device_id, "offline")  # Update status to offline if connection fails
+                stop_events[device_id].set()  # Signal to stop detection
+                break
+            continue
+
+        if frame_queues[device_id].full():
+            continue
+        frame_queues[device_id].put(frame)
 
     cap.release()
     logger.info(f"Stopped frame capture for device {device_id}")
+
+
+def capture_frames(rtsp_url, device_id):
+    logger.info(f"Starting frame capture for device {device_id} with URL {rtsp_url}")
+    retries = 0
+    cap = None
+
+    while retries < Config.MAX_RETRIES:
+        cap = cv2.VideoCapture(rtsp_url)
+        if not cap.isOpened():
+            logger.error(
+                f"Failed to open stream for device {device_id}, retrying... ({retries + 1}/{Config.MAX_RETRIES})")
+            retries += 1
+            time.sleep(Config.RETRY_DELAY)
+            continue
+
+        # Check if the camera is providing valid frames
+        ret, frame = cap.read()
+        if ret:
+            logger.info(f"Successfully connected to device {device_id}.")
+            # Update status to online only after successfully capturing a valid frame
+            update_device_status(device_id, "online")
+            break
+        else:
+            logger.error(
+                f"Failed to read initial frame for device {device_id}, retrying... ({retries + 1}/{Config.MAX_RETRIES})")
+            retries += 1
+            time.sleep(Config.RETRY_DELAY)
+
+    if retries >= Config.MAX_RETRIES or not cap.isOpened():
+        logger.error(f"Max retries reached for device {device_id}. Connection failed.")
+        if cap:
+            cap.release()
+        update_device_status(device_id, "offline")
+        stop_detection(device_id)  # Stop detection for the device
+        return  # Early exit if connection failed
+
+    # Proceed with frame capturing
+    while cap.isOpened() and not stop_events[device_id].is_set():
+        ret, frame = cap.read()
+        if not ret:
+            logger.warning(f"Failed to read frame for device {device_id}, retrying...")
+            retries += 1
+            time.sleep(Config.RETRY_DELAY)
+            if retries >= Config.MAX_RETRIES:
+                logger.error(f"Max retries reached for device {device_id}. Stopping capture.")
+                update_device_status(device_id, "offline")  # Update status to offline if connection fails
+                stop_detection(device_id)  # Stop detection for the device
+                break
+            continue
+
+        if frame_queues[device_id].full():
+            continue
+        frame_queues[device_id].put(frame)
+
+    cap.release()
+    logger.info(f"Stopped frame capture for device {device_id}")
+
 
 def detect_and_process_frames(device_id, update_callback=None):
     logger.info(f"Starting frame processing for device {device_id}")
@@ -177,8 +208,6 @@ def start_detection(device_id, update_callback=None):
     capture_threads[device_id] = capture_thread
     process_threads[device_id] = process_thread
 
-    update_device_status(device_id, "online")
-
     capture_thread.start()
     process_thread.start()
 
@@ -191,30 +220,23 @@ def stop_detection(device_id):
         stop_events[device_id].set()
 
     if device_id in capture_threads:
-        logger.debug(f"Stopping capture thread for device {device_id}")
-        capture_threads[device_id].join(timeout=5)
+        if threading.current_thread() != capture_threads[device_id]:
+            logger.debug(f"Stopping capture thread for device {device_id}")
+            capture_threads[device_id].join(timeout=5)
         capture_threads.pop(device_id)
-    else:
-        logger.warning(f"No capture thread found for device {device_id}")
 
     if device_id in process_threads:
         logger.debug(f"Stopping process thread for device {device_id}")
         process_threads[device_id].join(timeout=5)
         process_threads.pop(device_id)
-    else:
-        logger.warning(f"No process thread found for device {device_id}")
 
     if device_id in frame_queues:
         logger.debug(f"Clearing frame queue for device {device_id}")
         frame_queues.pop(device_id)
-    else:
-        logger.warning(f"No frame queue found for device {device_id}")
 
     if device_id in active_cameras:
         logger.debug(f"Removing active camera entry for device {device_id}")
         active_cameras.pop(device_id)
-    else:
-        logger.warning(f"No active camera entry found for device {device_id}")
 
     if device_id in stop_events:
         logger.debug(f"Removing stop event for device {device_id}")
