@@ -59,6 +59,62 @@ def get_uuid_for_tracker_id(tracker_id):
 async def send_update(data, update_callback):
     await update_callback(data)
 
+def capture_frames(rtsp_url, device_id):
+    logger.info(f"Starting frame capture for device {device_id} with URL {rtsp_url}")
+    retries = 0
+    cap = None
+
+    while retries < Config.MAX_RETRIES:
+        cap = cv2.VideoCapture(rtsp_url)
+        if not cap.isOpened():
+            logger.error(
+                f"Failed to open stream for device {device_id}, retrying... ({retries + 1}/{Config.MAX_RETRIES})")
+            retries += 1
+            time.sleep(Config.RETRY_DELAY)
+            continue
+
+        # Check if the camera is providing valid frames
+        ret, frame = cap.read()
+        if ret:
+            logger.info(f"Successfully connected to device {device_id}.")
+            # Update status to online only after successfully capturing a valid frame
+            update_device_status(device_id, "online")
+            break
+        else:
+            logger.error(
+                f"Failed to read initial frame for device {device_id}, retrying... ({retries + 1}/{Config.MAX_RETRIES})")
+            retries += 1
+            time.sleep(Config.RETRY_DELAY)
+
+    if retries >= Config.MAX_RETRIES or not cap.isOpened():
+        logger.error(f"Max retries reached for device {device_id}. Connection failed.")
+        if cap:
+            cap.release()
+        update_device_status(device_id, "offline")
+        stop_events[device_id].set()  # Signal to stop detection
+        return  # Early exit if connection failed
+
+    # Proceed with frame capturing
+    while cap.isOpened() and not stop_events[device_id].is_set():
+        ret, frame = cap.read()
+        if not ret:
+            logger.warning(f"Failed to read frame for device {device_id}, retrying...")
+            retries += 1
+            time.sleep(Config.RETRY_DELAY)
+            if retries >= Config.MAX_RETRIES:
+                logger.error(f"Max retries reached for device {device_id}. Stopping capture.")
+                update_device_status(device_id, "offline")  # Update status to offline if connection fails
+                stop_events[device_id].set()  # Signal to stop detection
+                break
+            continue
+
+        if frame_queues[device_id].full():
+            continue
+        frame_queues[device_id].put(frame)
+
+    cap.release()
+    logger.info(f"Stopped frame capture for device {device_id}")
+
 async def process_frame(device_id, frame, results, update_callback=None):
     try:
         logger.info(f"Processing frame for device {device_id}")
@@ -112,63 +168,6 @@ async def process_frame(device_id, frame, results, update_callback=None):
 
     except Exception as e:
         logger.error(f"Error processing frame for device {device_id}: {e}")
-
-def capture_frames(rtsp_url, device_id):
-    logger.info(f"Starting frame capture for device {device_id} with URL {rtsp_url}")
-    retries = 0
-    cap = None
-
-    while retries < Config.MAX_RETRIES:
-        cap = cv2.VideoCapture(rtsp_url)
-        if not cap.isOpened():
-            logger.error(
-                f"Failed to open stream for device {device_id}, retrying... ({retries + 1}/{Config.MAX_RETRIES})")
-            retries += 1
-            time.sleep(Config.RETRY_DELAY)
-            continue
-
-        # Check if the camera is providing valid frames
-        ret, frame = cap.read()
-        if ret:
-            logger.info(f"Successfully connected to device {device_id}.")
-            # Update status to online only after successfully capturing a valid frame
-            update_device_status(device_id, "online")
-            break
-        else:
-            logger.error(
-                f"Failed to read initial frame for device {device_id}, retrying... ({retries + 1}/{Config.MAX_RETRIES})")
-            retries += 1
-            time.sleep(Config.RETRY_DELAY)
-
-    if retries >= Config.MAX_RETRIES or not cap.isOpened():
-        logger.error(f"Max retries reached for device {device_id}. Connection failed.")
-        if cap:
-            cap.release()
-        update_device_status(device_id, "offline")
-        stop_detection(device_id)  # Stop detection for the device
-        return  # Early exit if connection failed
-
-    # Proceed with frame capturing
-    while cap.isOpened() and not stop_events[device_id].is_set():
-        ret, frame = cap.read()
-        if not ret:
-            logger.warning(f"Failed to read frame for device {device_id}, retrying...")
-            retries += 1
-            time.sleep(Config.RETRY_DELAY)
-            if retries >= Config.MAX_RETRIES:
-                logger.error(f"Max retries reached for device {device_id}. Stopping capture.")
-                update_device_status(device_id, "offline")  # Update status to offline if connection fails
-                stop_detection(device_id)  # Stop detection for the device
-                break
-            continue
-
-        if frame_queues[device_id].full():
-            continue
-        frame_queues[device_id].put(frame)
-
-    cap.release()
-    logger.info(f"Stopped frame capture for device {device_id}")
-
 
 def detect_and_process_frames(device_id, update_callback=None):
     logger.info(f"Starting frame processing for device {device_id}")
