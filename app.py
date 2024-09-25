@@ -9,7 +9,7 @@ from detection.detection import start_detection, stop_detection, list_active_cam
 
 app = FastAPI()
 
-allowed_origins = ["http://localhost:5173"]
+allowed_origins = ["*"]
 
 app.add_middleware(
     CORSMiddleware,
